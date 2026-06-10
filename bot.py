@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🤖 SHEIN Price Calculator Bot v2.3 - Fixed & Optimized Edition
+🤖 SHEIN Price Calculator Bot v2.3 - Fixed & Secured Edition
 """
 
 import os
 import logging
 import json
 import asyncio
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-# حاول استيراد pymongo
+# محاولة استيراد pymongo
 try:
     from pymongo import MongoClient
     MONGO_AVAILABLE = True
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-# جلب معرف الأدمن بشكل آمن تماماً
+# جلب معرف الأدمن بشكل آمن تماماً وسد الثغرة الأمنية
 try:
     admin_id_str = os.getenv('ADMIN_ID', '').strip()
     ADMIN_ID = int(admin_id_str) if admin_id_str.isdigit() else None
@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
 mongo_client = None
 mongo_db = None
 
-# ==================== خادم ويب لـ Railway / Render ====================
+# ==================== خادم ويب وهمي متوافق مع Railway ====================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -78,28 +78,27 @@ def run_health_server():
     except Exception as e:
         logger.error(f"⚠️ فشل تشغيل خادم فحص الحالة: {e}")
 
-# تشغيل الخادم في خلفية الخدمة
 threading.Thread(target=run_health_server, daemon=True).start()
 
-# ==================== قاعدة البيانات ====================
+# ==================== إدارة البيانات ====================
 def connect_to_mongo():
     global mongo_client, mongo_db
     try:
         if MONGO_AVAILABLE and MONGO_URI:
             mongo_client = MongoClient(
                 MONGO_URI,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=10000,
+                serverSelectionTimeoutMS=2000, # تقليل وقت الانتظار لمنع تعليق البوت أثناء التشغيل
+                connectTimeoutMS=5000,
                 retryWrites=True,
                 tls=True,
                 tlsAllowInvalidCertificates=True
             )
             mongo_client.admin.command('ping')
             mongo_db = mongo_client['shein_bot']
-            logger.info("✅ تم الاتصال بـ MongoDB")
+            logger.info("✅ تم الاتصال بـ MongoDB بنجاح")
             return True
     except Exception as e:
-        logger.warning(f"⚠️ خطأ MongoDB: {e}. سيتم استخدام JSON كبديل محلي.")
+        logger.warning(f"⚠️ خطأ قاعدة البيانات السحابية: {e}. سيتم التراجع لاستخدام ملف JSON المحلي.")
     return False
 
 def load_config():
@@ -112,7 +111,7 @@ def load_config():
                 config.update(config_doc)
                 return config
         except Exception as e:
-            logger.warning(f"خطأ في قراءة MongoDB: {e}")
+            logger.warning(f"خطأ قراءة سحابة: {e}")
     
     if os.path.exists(CONFIG_FILE):
         try:
@@ -122,8 +121,7 @@ def load_config():
                 config.update(loaded)
                 return config
         except Exception as e:
-            logger.warning(f"خطأ في قراءة JSON: {e}")
-    
+            logger.warning(f"خطأ قراءة JSON: {e}")
     return DEFAULT_CONFIG.copy()
 
 def save_config(config):
@@ -131,21 +129,16 @@ def save_config(config):
         try:
             config_to_save = config.copy()
             config_to_save['_id'] = 'settings'
-            mongo_db['config'].update_one(
-                {'_id': 'settings'},
-                {'$set': config_to_save},
-                upsert=True
-            )
-            logger.info("✅ تم حفظ البيانات في MongoDB")
+            mongo_db['config'].update_one({'_id': 'settings'}, {'$set': config_to_save}, upsert=True)
+            logger.info("✅ تم حفظ التعديلات في السحابة")
         except Exception as e:
-            logger.warning(f"خطأ في حفظ MongoDB: {e}")
-    
+            logger.warning(f"خطأ حفظ السحابة: {e}")
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        logger.info("✅ تم حفظ البيانات في JSON")
+        logger.info("✅ تم حفظ التعديلات محلياً")
     except Exception as e:
-        logger.error(f"خطأ في حفظ JSON: {e}")
+        logger.error(f"خطأ حفظ JSON: {e}")
 
 def format_currency(amount: float) -> str:
     return f"{amount:,.0f}"
@@ -153,25 +146,19 @@ def format_currency(amount: float) -> str:
 def calculate_prices(base_price: float, category: str, config: dict):
     exchange_rate = config.get('exchange_rate', DEFAULT_CONFIG['exchange_rate'])
     usd_rate = config.get('usd_rate', DEFAULT_CONFIG['usd_rate'])
-    
-    if category == 'clothing':
-        fee_usd = config.get('clothing_fee', DEFAULT_CONFIG['clothing_fee'])
-    else:
-        fee_usd = config.get('other_fee', DEFAULT_CONFIG['other_fee'])
+    fee_usd = config.get('clothing_fee' if category == 'clothing' else 'other_fee', 1.0)
     
     base_syp = base_price * exchange_rate
     base_usd = base_syp / usd_rate
     fee_syp = fee_usd * usd_rate
     total_syp = base_syp + fee_syp
     total_usd = base_usd + fee_usd
-    
     return base_syp, base_usd, fee_syp, fee_usd, total_syp, total_usd
 
 # ==================== Admin Handlers ====================
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # إصلاح الأمان: لو لم يتم تعيين ADMIN_ID أو تعيينه بشكل خاطئ، يتم حظر الجميع تلقائياً لحين ضبطه
     if ADMIN_ID is None or update.message.from_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ غير مسموح لك بالوصول إلى لوحة التحكم الخاصة بالإدارة.")
+        await update.message.reply_text("❌ عذراً، هذه القائمة مخصصة لإدارة البوت فقط والوصول إليها ممنوع.")
         return ConversationHandler.END
     
     keyboard = [
@@ -180,50 +167,30 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         [InlineKeyboardButton("📱 رقم الواتس", callback_data='set_whatsapp'), InlineKeyboardButton("📊 عرض الإعدادات", callback_data='show_config')],
         [InlineKeyboardButton("❌ إغلاق القائمة", callback_data='cancel')]
     ]
-    
-    await update.message.reply_text(
-        "📋 <b>لوحة تحكم الإدارة</b>\n\nاختر الإعداد الذي ترغب بتعديله:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.HTML
-    )
+    await update.message.reply_text("📋 <b>لوحة تحكم الإدارة</b>\n\nاختر الإعداد المطلوب:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     return ADMIN_MENU
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    
     if query.data == 'set_rate':
-        await query.edit_message_text("💱 أرسل سعر صرف <b>الريال السعودي</b> مقابل الليرة (مثال: 3400)", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("💱 أرسل سعر صرف <b>الريال السعودي</b> مقابل الليرة:")
         return SET_RATE
     elif query.data == 'set_usd_rate':
-        await query.edit_message_text("💵 أرسل سعر صرف <b>الدولار الأمريكي</b> مقابل الليرة (مثال: 15000)", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("💵 أرسل سعر صرف <b>الدولار الأمريكي</b> مقابل الليرة:")
         return SET_USD_RATE
     elif query.data == 'set_clothing_fee':
-        await query.edit_message_text("👕 أرسل أجور شحن الملابس والأحذية بـ <b>الدولار</b> (مثال: 2)", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("👕 أرسل أجور الملابس بـ <b>الدولار</b>:")
         return SET_CATEGORY_FEE
     elif query.data == 'set_other_fee':
-        await query.edit_message_text("🎁 أرسل أجور شحن المنتجات الأخرى بـ <b>الدولار</b> (مثال: 1)", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("🎁 أرسل أجور الإكسسوارات بـ <b>الدولار</b>:")
         return SET_OTHER_FEE
     elif query.data == 'set_whatsapp':
-        await query.edit_message_text("📱 أرسل رقم الواتس (مثال: +963123456789)")
+        await query.edit_message_text("📱 أرسل رقم الواتساب كاملاً مع رمز الدولة (مثال: +963900000000):")
         return SET_WHATSAPP
     elif query.data == 'show_config':
         config = load_config()
-        usd_rate = config.get('usd_rate', DEFAULT_CONFIG['usd_rate'])
-        base_syp, base_usd, fee_syp, fee_usd, total_syp, total_usd = calculate_prices(100, 'clothing', config)
-        
-        msg = f"""
-📊 <b>الإعدادات الحالية:</b>
-
-💱 الريال: <b>{format_currency(config['exchange_rate'])} ل.س</b>
-💵 الدولار: <b>{format_currency(usd_rate)} ل.س</b>
-👕 شحن الملابس: <b>{config['clothing_fee']} $</b>
-🎁 شحن أخرى: <b>{config['other_fee']} $</b>
-
-📐 <b>معاينة لفاتورة قطعة ملابس بـ 100 ريال:</b>
-ليرة: {format_currency(base_syp)} + شحن {format_currency(fee_syp)} = <b>{format_currency(total_syp)} ل.س</b>
-دولار: {base_usd:.2f} + شحن {fee_usd:.2f} = <b>{total_usd:.2f} $</b>
-        """
+        msg = f"📊 <b>الإعدادات الحالية:</b>\n\nالريال: {format_currency(config['exchange_rate'])} ل.س\nالدولار: {format_currency(config['usd_rate'])} ل.س\nأجور الملابس: {config['clothing_fee']}$\nأجور أخرى: {config['other_fee']}$"
         await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
         return ConversationHandler.END
     elif query.data == 'cancel':
@@ -232,86 +199,79 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def set_rate_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
-        new_rate = float(update.message.text)
-        if new_rate <= 0: raise ValueError
+        val = float(update.message.text)
+        if val <= 0: raise ValueError
         config = load_config()
-        config['exchange_rate'] = new_rate
+        config['exchange_rate'] = val
         save_config(config)
-        await update.message.reply_text(f"✅ تم الحفظ! سعر الريال الآن: {format_currency(new_rate)} ل.س")
+        await update.message.reply_text(f"✅ تم تعديل سعر الريال إلى: {format_currency(val)} ل.س")
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ رقم غير صالح، حاول مجدداً.")
+        await update.message.reply_text("❌ أدخل رقماً صحيحاً.")
         return SET_RATE
 
 async def set_usd_rate_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
-        new_rate = float(update.message.text)
-        if new_rate <= 0: raise ValueError
+        val = float(update.message.text)
+        if val <= 0: raise ValueError
         config = load_config()
-        config['usd_rate'] = new_rate
+        config['usd_rate'] = val
         save_config(config)
-        await update.message.reply_text(f"✅ تم الحفظ! سعر الدولار الآن: {format_currency(new_rate)} ل.س")
+        await update.message.reply_text(f"✅ تم تعديل سعر الدولار إلى: {format_currency(val)} ل.س")
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ رقم غير صالح، حاول مجدداً.")
+        await update.message.reply_text("❌ أدخل رقماً صحيحاً.")
         return SET_USD_RATE
 
 async def set_clothing_fee_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
-        new_fee = float(update.message.text)
-        if new_fee < 0: raise ValueError
+        val = float(update.message.text)
+        if val < 0: raise ValueError
         config = load_config()
-        config['clothing_fee'] = new_fee
+        config['clothing_fee'] = val
         save_config(config)
-        await update.message.reply_text(f"✅ تم الحفظ! أجور الملابس: {new_fee} $")
+        await update.message.reply_text(f"✅ تم تعديل قيمة شحن الملابس إلى: {val} $")
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ رقم غير صالح، حاول مجدداً.")
+        await update.message.reply_text("❌ أدخل رقماً صحيحاً.")
         return SET_CATEGORY_FEE
 
 async def set_other_fee_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
-        new_fee = float(update.message.text)
-        if new_fee < 0: raise ValueError
+        val = float(update.message.text)
+        if val < 0: raise ValueError
         config = load_config()
-        config['other_fee'] = new_fee
+        config['other_fee'] = val
         save_config(config)
-        await update.message.reply_text(f"✅ تم الحفظ! الأجور الأخرى: {new_fee} $")
+        await update.message.reply_text(f"✅ تم تعديل قيمة شحن الإكسسوارات إلى: {val} $")
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ رقم غير صالح، حاول مجدداً.")
+        await update.message.reply_text("❌ أدخل رقماً صحيحاً.")
         return SET_OTHER_FEE
 
 async def set_whatsapp_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    whatsapp = update.message.text.strip()
-    if len(whatsapp) < 5:
-        await update.message.reply_text("❌ رقم غير صالح.")
+    txt = update.message.text.strip()
+    if len(txt) < 7:
+        await update.message.reply_text("❌ رقم هاتف غير منطقي.")
         return SET_WHATSAPP
     config = load_config()
-    config['whatsapp'] = whatsapp
+    config['whatsapp'] = txt
     save_config(config)
-    await update.message.reply_text(f"✅ تم الحفظ! الرقم الجديد: {whatsapp}")
+    await update.message.reply_text(f"✅ تم اعتماد رقم الواتساب الجديد: {txt}")
     return ConversationHandler.END
 
 # ==================== User Handlers ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_name = update.message.from_user.first_name or "المستخدم"
     welcome = f"""
-═════════════════════════════
-🛍️ <b>بوت حاسبة أسعار SHEIN</b> 🛍️
-═════════════════════════════
+🛍️ <b>بوت حاسبة أسعار SHEIN السوق السوري</b> 👋
 
-مرحباً {user_name}! 👋
-يساعدك هذا البوت على حساب التكلفة الدقيقة لمنتجات شي إن متضمنة أجور الشحن.
-
-📝 <b>الخطوات المطلوبة:</b>
-1️⃣ تأكد أن تطبيق SHEIN مضبوط على <b>السعودية (SAR)</b>.
-2️⃣ اختر فئة المنتج من الأزرار بالأسفل.
-3️⃣ أدخل السعر بالريال ليتم حساب الفاتورة لك.
+احسب القيمة الإجمالية لقطع شي إن شاملة عمولات الشحن الثابتة بدقة.
+1️⃣ اضبط تطبيق شي إن على <b>السعودية (SAR)</b>.
+2️⃣ اختر نوع المنتج من الأزرار بالأسفل:
     """
     keyboard = [
         [InlineKeyboardButton("👕 ملابس، أحذية، حقائب", callback_data='cat_clothing')],
-        [InlineKeyboardButton("🎁 منتجات أخرى (إكسسوارات وغيرها)", callback_data='cat_other')]
+        [InlineKeyboardButton("🎁 منتجات أخرى وإكسسوارات", callback_data='cat_other')]
     ]
     await update.message.reply_text(welcome, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     return CATEGORY_SELECTION
@@ -320,13 +280,7 @@ async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
     context.user_data['category'] = 'clothing' if query.data == 'cat_clothing' else 'other'
-    
-    msg = """
-✅ ممتاز!
-الآن قم بكتابة <b>سعر المنتج بالريال السعودي</b> كما يظهر لك في التطبيق:
-<i>(مثال: 120)</i>
-    """
-    await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
+    await query.edit_message_text("💰 الآن، أرسل <b>سعر المنتج بالريال السعودي</b> كما يظهر بالتطبيق:", parse_mode=ParseMode.HTML)
     return PRICE_INPUT
 
 async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -336,36 +290,30 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         
         category = context.user_data.get('category', 'other')
         config = load_config()
-        
         base_syp, base_usd, fee_syp, fee_usd, total_syp, total_usd = calculate_prices(base_price, category, config)
         
         result = f"""
-═════════════════════════════
-🧾 <b>تفاصيل الفاتورة النهائية</b> 🧾
-═════════════════════════════
-🏷️ سعر المنتج الأصلي: <b>{format_currency(base_price)} ر.س</b> 🇸🇦
+🧾 <b>تفاصيل الفاتورة المقدرة للمنتج:</b>
+🏷️ السعر الأساسي: {format_currency(base_price)} ريال سعودي
 
-🇸🇾 <b>الفاتورة بالليرة السورية:</b>
-┌ سعر المنتج: {format_currency(base_syp)} ل.س
+🇸🇾 <b>بالليرة السورية:</b>
+┌ المنتج صافي: {format_currency(base_syp)} ل.س
 ├ أجور الشحن: {format_currency(fee_syp)} ل.س
 └ <b>الإجمالي المطلوب: {format_currency(total_syp)} ل.س</b>
 
-💵 <b>الفاتورة بالدولار الأمريكي:</b>
-┌ سعر المنتج: {base_usd:.2f} $
+💵 <b>بالدولار الأمريكي:</b>
+┌ المنتج صافي: {base_usd:.2f} $
 ├ أجور الشحن: {fee_usd:.2f} $
 └ <b>الإجمالي المطلوب: {total_usd:.2f} $</b>
-═════════════════════════════
 
-📱 <b>للطلب:</b> يرجى تصوير هذه الشاشة ومراسلتنا على الواتساب عبر الرابط التالي:
-<a href="https://wa.me/{config['whatsapp'].replace('+', '').replace(' ', '')}">{config['whatsapp']}</a>
+📱 <b>لتأكيد الطلب:</b> يرجى تصوير الشاشة وإرسالها عبر الواتساب:
+👉 <a href="https://wa.me/{config['whatsapp'].replace('+', '').replace(' ', '')}">اضغط هنا لمراسلتنا ({config['whatsapp']})</a>
         """
-        
-        keyboard = [[InlineKeyboardButton("🔄 حساب منتج جديد", callback_data='start_again')]]
+        keyboard = [[InlineKeyboardButton("🔄 حساب قطعة جديدة", callback_data='start_again')]]
         await update.message.reply_text(result, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         return CATEGORY_SELECTION
-        
     except ValueError:
-        await update.message.reply_text("❌ الرجاء إدخال رقم صحيح (مثال: 150)", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("❌ الرجاء إرسال سعر رقمي صحيح (مثال: 85 أو 140.5)")
         return PRICE_INPUT
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -376,18 +324,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             [InlineKeyboardButton("👕 ملابس، أحذية، حقائب", callback_data='cat_clothing')],
             [InlineKeyboardButton("🎁 منتجات أخرى", callback_data='cat_other')]
         ]
-        await query.edit_message_text("🛍️ <b>اختر فئة المنتج:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+        await query.edit_message_text("🛍️ <b>اختر فئة المنتج الجديد:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         return CATEGORY_SELECTION
 
 def main() -> None:
     if not TELEGRAM_TOKEN:
-        logger.error("❌ لم يتم تعيين TELEGRAM_BOT_TOKEN كمتغير بيئة!")
+        logger.error("❌ لم يتم العثور على متغير البيئة TELEGRAM_BOT_TOKEN")
         return
         
     connect_to_mongo()
     
     from telegram.request import HTTPXRequest
-    custom_request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0, write_timeout=60.0, pool_timeout=60.0)
+    custom_request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     
     app = Application.builder().token(TELEGRAM_TOKEN).request(custom_request).build()
     
@@ -411,9 +359,9 @@ def main() -> None:
     )
     
     app.add_handler(conv_handler)
-    logger.info("✅ البوت يعمل الآن وبانتظار التحديثات...")
+    logger.info("🚀 البوت مستعد وبدأ استقبال البيانات بكفاءة...")
     
-    # دالة run_polling تتكفل بكل شيء بخصوص الـ Event Loop داخلياً تلقائياً
+    # دع المكتبة تدير الـ Loop لمنع مشاكل بايثون 3.13
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == '__main__':
