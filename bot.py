@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🤖 SHEIN Price Calculator Bot v2.3 - Fixed & Secured Edition
+🤖 SHEIN Price Calculator Bot v2.5 - Exact Float Precision
 """
 
 import os
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-# جلب معرف الأدمن بشكل آمن تماماً وسد الثغرة الأمنية
+# جلب معرف الأدمن بشكل آمن تماماً
 try:
     admin_id_str = os.getenv('ADMIN_ID', '').strip()
     ADMIN_ID = int(admin_id_str) if admin_id_str.isdigit() else None
@@ -48,8 +48,8 @@ MONGO_URI = os.getenv('MONGO_URI', None)
 CATEGORY_SELECTION, PRICE_INPUT, ADMIN_MENU, SET_RATE, SET_USD_RATE, SET_CATEGORY_FEE, SET_OTHER_FEE, SET_WHATSAPP = range(8)
 
 DEFAULT_CONFIG = {
-    'exchange_rate': 3400,   
-    'usd_rate': 15000,       
+    'exchange_rate': 3400.0,   
+    'usd_rate': 15000.0,       
     'clothing_fee': 2.0,     
     'other_fee': 1.0,        
     'whatsapp': '+963123456789'
@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
 mongo_client = None
 mongo_db = None
 
-# ==================== خادم ويب وهمي متوافق مع Railway ====================
+# ==================== خادم ويب وهمي متوافق مع الاستضافة ====================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -87,7 +87,7 @@ def connect_to_mongo():
         if MONGO_AVAILABLE and MONGO_URI:
             mongo_client = MongoClient(
                 MONGO_URI,
-                serverSelectionTimeoutMS=2000, # تقليل وقت الانتظار لمنع تعليق البوت أثناء التشغيل
+                serverSelectionTimeoutMS=2000,
                 connectTimeoutMS=5000,
                 retryWrites=True,
                 tls=True,
@@ -141,12 +141,13 @@ def save_config(config):
         logger.error(f"خطأ حفظ JSON: {e}")
 
 def format_currency(amount: float) -> str:
-    return f"{amount:,.0f}"
+    # التعديل هنا: إبقاء الفواصل دائماً كـ Double مع مرتبتين عشريتين لتأكيد الدقة
+    return f"{amount:,.2f}"
 
 def calculate_prices(base_price: float, category: str, config: dict):
-    exchange_rate = config.get('exchange_rate', DEFAULT_CONFIG['exchange_rate'])
-    usd_rate = config.get('usd_rate', DEFAULT_CONFIG['usd_rate'])
-    fee_usd = config.get('clothing_fee' if category == 'clothing' else 'other_fee', 1.0)
+    exchange_rate = float(config.get('exchange_rate', DEFAULT_CONFIG['exchange_rate']))
+    usd_rate = float(config.get('usd_rate', DEFAULT_CONFIG['usd_rate']))
+    fee_usd = float(config.get('clothing_fee' if category == 'clothing' else 'other_fee', 1.0))
     
     base_syp = base_price * exchange_rate
     base_usd = base_syp / usd_rate
@@ -190,7 +191,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return SET_WHATSAPP
     elif query.data == 'show_config':
         config = load_config()
-        msg = f"📊 <b>الإعدادات الحالية:</b>\n\nالريال: {format_currency(config['exchange_rate'])} ل.س\nالدولار: {format_currency(config['usd_rate'])} ل.س\nأجور الملابس: {config['clothing_fee']}$\nأجور أخرى: {config['other_fee']}$"
+        msg = f"📊 <b>الإعدادات الحالية:</b>\n\nالريال: {format_currency(config['exchange_rate'])} ل.س\nالدولار: {format_currency(config['usd_rate'])} ل.س\nأجور الملابس: {format_currency(config['clothing_fee'])}$\nأجور أخرى: {format_currency(config['other_fee'])}$"
         await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
         return ConversationHandler.END
     elif query.data == 'cancel':
@@ -230,7 +231,7 @@ async def set_clothing_fee_input(update: Update, context: ContextTypes.DEFAULT_T
         config = load_config()
         config['clothing_fee'] = val
         save_config(config)
-        await update.message.reply_text(f"✅ تم تعديل قيمة شحن الملابس إلى: {val} $")
+        await update.message.reply_text(f"✅ تم تعديل قيمة شحن الملابس إلى: {format_currency(val)} $")
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("❌ أدخل رقماً صحيحاً.")
@@ -243,7 +244,7 @@ async def set_other_fee_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         config = load_config()
         config['other_fee'] = val
         save_config(config)
-        await update.message.reply_text(f"✅ تم تعديل قيمة شحن الإكسسوارات إلى: {val} $")
+        await update.message.reply_text(f"✅ تم تعديل قيمة شحن الإكسسوارات إلى: {format_currency(val)} $")
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("❌ أدخل رقماً صحيحاً.")
@@ -292,28 +293,46 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         config = load_config()
         base_syp, base_usd, fee_syp, fee_usd, total_syp, total_usd = calculate_prices(base_price, category, config)
         
+        wa_number = config['whatsapp']
+        wa_link = f"https://wa.me/{wa_number.replace('+', '').replace(' ', '')}"
+
         result = f"""
 🧾 <b>تفاصيل الفاتورة المقدرة للمنتج:</b>
 🏷️ السعر الأساسي: {format_currency(base_price)} ريال سعودي
 
 🇸🇾 <b>بالليرة السورية:</b>
 ┌ المنتج صافي: {format_currency(base_syp)} ل.س
-├ أجور الشحن: {format_currency(fee_syp)} ل.س
-└ <b>الإجمالي المطلوب: {format_currency(total_syp)} ل.س</b>
 
 💵 <b>بالدولار الأمريكي:</b>
-┌ المنتج صافي: {base_usd:.2f} $
-├ أجور الشحن: {fee_usd:.2f} $
-└ <b>الإجمالي المطلوب: {total_usd:.2f} $</b>
+┌ المنتج صافي: {format_currency(base_usd)} $
+├ أجور الشحن: {format_currency(fee_usd)} $
+└ <b>الإجمالي المطلوب: {format_currency(total_usd)} $</b>
 
-📱 <b>لتأكيد الطلب:</b> يرجى تصوير الشاشة وإرسالها عبر الواتساب:
-👉 <a href="https://wa.me/{config['whatsapp'].replace('+', '').replace(' ', '')}">اضغط هنا لمراسلتنا ({config['whatsapp']})</a>
+---
+📝 <b>الآن الخطوة الأخيرة وهي التوصية:</b>
+بعد أن تعرفت على أسعار المنتجات، تتم التوصية بشكل رسمي عبر إرسال رسالة محددة عبر الواتساب إلى الرقم <a href="{wa_link}">{wa_number}</a>. 
+يجب أن تتضمن الرسالة المعلومات التالية:
+
+* جميع أرقام المنتجات المراد التوصية عليها في الطلبية، كل رقم في سطر، يرجى كتابة المقاس بجانبه (إن وجد).
+* إجمالي سعر منتجات الطلبية كاملة بالدولار (اجمعها بنفسك وذلك للتأكيد)، ستتم مراجعتها بكل حال.
+* طريقة الدفع "يد" أو "هرم" أو "شام كاش".
+
+💡 <b>يرجى التقيد بالتعليمات أعلاه بدقة. مثال على طلب رسمي يتم أخذه بعين الاعتبار:</b>
+<code>------------------------
+34185673
+76658493 xl
+65784371 M
+76523671
+
+إجمالي السعر: 50.00 $
+طريقة الدفع: شام كاش
+------------------------</code>
         """
         keyboard = [[InlineKeyboardButton("🔄 حساب قطعة جديدة", callback_data='start_again')]]
         await update.message.reply_text(result, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         return CATEGORY_SELECTION
     except ValueError:
-        await update.message.reply_text("❌ الرجاء إرسال سعر رقمي صحيح (مثال: 85 أو 140.5)")
+        await update.message.reply_text("❌ الرجاء إرسال سعر رقمي صحيح (مثال: 85.00 أو 140.50)")
         return PRICE_INPUT
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -361,7 +380,6 @@ def main() -> None:
     app.add_handler(conv_handler)
     logger.info("🚀 البوت مستعد وبدأ استقبال البيانات بكفاءة...")
     
-    # دع المكتبة تدير الـ Loop لمنع مشاكل بايثون 3.13
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == '__main__':
