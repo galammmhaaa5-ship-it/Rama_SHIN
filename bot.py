@@ -264,7 +264,7 @@ async def set_whatsapp_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ==================== User Handlers ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     welcome = f"""
-🛍️ <b>بوت حاسبة أسعار SHEIN السوق السوري</b> 👋
+🛍️ <b>بوت حاسبة أسعار SHEIN  </b> 
 
 احسب القيمة الإجمالية لقطع شي إن شاملة عمولات الشحن الثابتة بدقة.
 1️⃣ اضبط تطبيق شي إن على <b>السعودية (SAR)</b>.
