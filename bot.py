@@ -264,8 +264,10 @@ async def set_whatsapp_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ==================== User Handlers ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     welcome = f"""
-🛍️ <b>بوت حاسبة أسعار SHEIN  </b> 
-
+مرحباً بك في بوت حساب أسعار منتجات SHEIN الخاص بخدمة
+ Rama Shein (حلب) ..
+🩷🩷
+نحن هنا لتلبية توصياتكم من تطبيق SHEIN 
 احسب القيمة الإجمالية لقطع شي إن شاملة عمولات الشحن الثابتة بدقة.
 1️⃣ اضبط تطبيق شي إن على <b>السعودية (SAR)</b>.
 2️⃣ اختر نوع المنتج من الأزرار بالأسفل:
@@ -326,7 +328,8 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 إجمالي السعر: 50.00 $
 طريقة الدفع: شام كاش
-------------------------</code>
+------------------------
+شكراً لثقتكم ، نأمل أن نكون عند حسن ظنكم ☺️🩷</code>
         """
         keyboard = [[InlineKeyboardButton("🔄 حساب قطعة جديدة", callback_data='start_again')]]
         await update.message.reply_text(result, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
