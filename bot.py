@@ -102,7 +102,8 @@ def connect_to_mongo():
     return False
 
 def load_config():
-    if mongo_db:
+    # التعديل الأول: استخدام المقارنة الصريحة لمنع خطأ NotImplementedError
+    if mongo_db is not None:
         try:
             config_doc = mongo_db['config'].find_one({'_id': 'settings'})
             if config_doc:
@@ -125,7 +126,8 @@ def load_config():
     return DEFAULT_CONFIG.copy()
 
 def save_config(config):
-    if mongo_db:
+    # التعديل الثاني: استخدام المقارنة الصريحة لمنع خطأ NotImplementedError
+    if mongo_db is not None:
         try:
             config_to_save = config.copy()
             config_to_save['_id'] = 'settings'
@@ -141,7 +143,6 @@ def save_config(config):
         logger.error(f"خطأ حفظ JSON: {e}")
 
 def format_currency(amount: float) -> str:
-    # التعديل هنا: إبقاء الفواصل دائماً كـ Double مع مرتبتين عشريتين لتأكيد الدقة
     return f"{amount:,.2f}"
 
 def calculate_prices(base_price: float, category: str, config: dict):
