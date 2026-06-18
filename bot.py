@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🤖 SHEIN Price Calculator Bot v2.6 - Multi-item Basket Support
+🤖 SHEIN Price Calculator Bot v2.5 - Exact Float Precision (Fix: Keep Price History)
 """
 
 import os
@@ -18,6 +18,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
+# محاولة استيراد pymongo
 try:
     from pymongo import MongoClient
     MONGO_AVAILABLE = True
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
+# جلب معرف الأدمن بشكل آمن تماماً
 try:
     admin_id_str = os.getenv('ADMIN_ID', '').strip()
     ADMIN_ID = int(admin_id_str) if admin_id_str.isdigit() else None
@@ -43,7 +45,6 @@ except (ValueError, TypeError):
 CONFIG_FILE = 'config.json'
 MONGO_URI = os.getenv('MONGO_URI', None)
 
-# إضافة مرحلة FINISH_ORDER للمحادثة
 CATEGORY_SELECTION, PRICE_INPUT, ADMIN_MENU, SET_RATE, SET_USD_RATE, SET_CATEGORY_FEE, SET_OTHER_FEE, SET_WHATSAPP = range(8)
 
 DEFAULT_CONFIG = {
@@ -261,9 +262,6 @@ async def set_whatsapp_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ==================== User Handlers ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # تصفير قائمة السلة للمستخدم عند بدء محادثة جديدة
-    context.user_data['items'] = []
-    
     welcome = f"""
 مرحباً بك في بوت حساب أسعار منتجات SHEIN الخاص بخدمة
  Rama Shein (حلب) ..
@@ -271,7 +269,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 نحن هنا لتلبية توصياتكم من تطبيق SHEIN 
 احسب القيمة الإجمالية لقطع شي إن شاملة عمولات الشحن الثابتة بدقة.
 1️⃣ اضبط تطبيق شي إن على <b>السعودية (SAR)</b>.
-2️⃣ اختر نوع المنتج من الأزرار بالأسفل للبدء بحساب أول قطعة:
+2️⃣ اختر نوع المنتج من الأزرار بالأسفل:
     """
     keyboard = [
         [InlineKeyboardButton("👕 ملابس، أحذية، حقائب", callback_data='cat_clothing')],
@@ -284,7 +282,13 @@ async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
     context.user_data['category'] = 'clothing' if query.data == 'cat_clothing' else 'other'
-    await query.edit_message_text("💰 الآن، أرسل <b>سعر المنتج بالريال السعودي</b> كما يظهر بالتطبيق:", parse_mode=ParseMode.HTML)
+    
+    # تم التعديل هنا: إرسال رسالة جديدة بدل التعديل لضمان بقاء الهستوري سليم
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="💰 الآن، أرسل <b>سعر المنتج بالريال السعودي</b> كما يظهر بالتطبيق:",
+        parse_mode=ParseMode.HTML
+    )
     return PRICE_INPUT
 
 async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -296,22 +300,11 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         config = load_config()
         base_syp, base_usd, fee_syp, fee_usd, total_syp, total_usd = calculate_prices(base_price, category, config)
         
-        # حفظ القطعة الحالية في السلة المتواجدة بالـ session
-        if 'items' not in context.user_data:
-            context.user_data['items'] = []
-            
-        item_data = {
-            'base_price': base_price,
-            'category': category,
-            'total_usd': total_usd,
-            'total_syp': total_syp
-        }
-        context.user_data['items'].append(item_data)
-        
-        current_count = len(context.user_data['items'])
-        
+        wa_number = config['whatsapp']
+        wa_link = f"https://wa.me/{wa_number.replace('+', '').replace(' ', '')}"
+
         result = f"""
-🧾 <b>تفاصيل الفاتورة للقطعة الحالية (رقم {current_count}):</b>
+🧾 <b>تفاصيل الفاتورة المقدرة للمنتج:</b>
 🏷️ السعر الأساسي: {format_currency(base_price)} ريال سعودي
 
 🇸🇾 <b>بالليرة السورية:</b>
@@ -320,15 +313,30 @@ async def price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 💵 <b>بالدولار الأمريكي:</b>
 ┌ المنتج صافي: {format_currency(base_usd)} $
 ├ أجور الشحن: {format_currency(fee_usd)} $
-└ <b>الإجمالي المطلوب للقطعة: {format_currency(total_usd)} $</b>
+└ <b>الإجمالي المطلوب: {format_currency(total_usd)} $</b>
 
 ---
-🛍️ تم إضافة القطعة إلى سلتك المؤقتة بنجاح! يمكنك الآن إضافة قطعة أخرى أو إنهاء الفاتورة وعرض المجموع الإجمالي لطلبك.
-"""
-        keyboard = [
-            [InlineKeyboardButton("➕ حساب قطعة إضافية", callback_data='start_again')],
-            [InlineKeyboardButton("🧾 إنهاء الفاتورة وعرض المجموع", callback_data='show_final_invoice')]
-        ]
+📝 <b>الآن الخطوة الأخيرة وهي التوصية:</b>
+بعد أن تعرفت على أسعار المنتجات، تتم التوصية بشكل رسمي عبر إرسال رسالة محددة عبر الواتساب إلى الرقم <a href="{wa_link}">{wa_number}</a>. 
+يجب أن تتضمن الرسالة المعلومات التالية:
+
+* جميع أرقام المنتجات المراد التوصية عليها في الطلبية، كل رقم في سطر، يرجى كتابة المقاس بجانبه (إن وجد).
+* إجمالي سعر منتجات الطلبية كاملة بالدولار (اجمعها بنفسك وذلك للتأكيد)، ستتم مراجعتها بكل حال.
+* طريقة الدفع "يد" أو "هرم" أو "شام كاش".
+
+💡 <b>يرجى التقيد بالتعليمات أعلاه بدقة. مثال على طلب رسمي يتم أخذه بعين الاعتبار:</b>
+<code>------------------------
+34185673
+76658493 xl
+65784371 M
+76523671
+
+إجمالي السعر: 50.00 $
+طريقة الدفع: شام كاش
+------------------------
+شكراً لثقتكم ، نأمل أن نكون عند حسن ظنكم ☺️🩷</code>
+        """
+        keyboard = [[InlineKeyboardButton("🔄 حساب قطعة جديدة", callback_data='start_again')]]
         await update.message.reply_text(result, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         return CATEGORY_SELECTION
     except ValueError:
@@ -340,67 +348,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
     
     if query.data == 'start_again':
-        keyboard = [
-            [InlineKeyboardButton("👕 ملابس، أحذية، حقائب", callback_data='cat_clothing')],
-            [InlineKeyboardButton("🎁 منتجات أخرى", callback_data='cat_other')]
-        ]
-        await query.edit_message_text("🛍️ <b>اختر فئة المنتج الجديد:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-        return CATEGORY_SELECTION
-        
-    elif query.data == 'show_final_invoice':
-        items = context.user_data.get('items', [])
-        if not items:
-            await query.edit_message_text("🛒 سلتك فارغة حالياً! اضغط /start للبدء من جديد.")
-            return ConversationHandler.END
+        # إزالة الزر القديم من رسالة السعر لحماية واجهة المحادثة، دون مسح النص نفسه
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
             
-        config = load_config()
-        wa_number = config['whatsapp']
-        wa_link = f"https://wa.me/{wa_number.replace('+', '').replace(' ', '')}"
-        
-        # حساب المجاميع الكلية لكل السلة
-        grand_total_usd = sum(item['total_usd'] for item in items)
-        grand_total_syp = sum(item['total_syp'] for item in items)
-        
-        final_msg = f"""
-📋 <b>ملخص الفاتورة النهائية الكلية ({len(items)} قطع):</b>
-
-💵 <b>الإجمالي الكلي بالدولار:</b> {format_currency(grand_total_usd)} $
-🇸🇾 <b>الإجمالي الكلي بالليرة:</b> {format_currency(grand_total_syp)} ل.س
-
----
- <b>الآن الخطوة الأخيرة وهي التوصية:</b>
-تتم التوصية بشكل رسمي عبر إرسال رسالة محددة عبر الواتساب إلى الرقم <a href="{wa_link}">{wa_number}</a>. 
-يجب أن تتضمن الرسالة المعلومات التالية:
-
-* جميع أرقام المنتجات المراد التوصية عليها في الطلبية، كل رقم في سطر، يرجى كتابة المقاس بجانبه (إن وجد).
-* إجمالي سعر منتجات الطلبية كاملة بالدولار وهو (<b>{format_currency(grand_total_usd)} $</b>).
-* طريقة الدفع "يد" أو "هرم" أو "شام كاش".
-
-💡 <b>يرجى التقيد بالتعليمات أعلاه بدقة. مثال على طلب رسمي جاهز للنسخ:</b>
-<code>------------------------
-ضع هنا أرقام المنتجات والمقاسات الخاصة بك
-مثال:
-34185673
-76658493 xl
-
-إجمالي السعر: {format_currency(grand_total_usd)} $
-طريقة الدفع: شام كاش
-------------------------</code>
-
-<b>شكراً لثقتكم ، نأمل أن نكون عند حسن ظنكم ☺️🩷</b>
-"""
-
-        keyboard = [[InlineKeyboardButton("🔄 بدء طلب جديد بالكامل", callback_data='reset_all')]]
-        await query.edit_message_text(final_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-        return CATEGORY_SELECTION
-
-    elif query.data == 'reset_all':
-        context.user_data['items'] = []
         keyboard = [
             [InlineKeyboardButton("👕 ملابس، أحذية، حقائب", callback_data='cat_clothing')],
             [InlineKeyboardButton("🎁 منتجات أخرى", callback_data='cat_other')]
         ]
-        await query.edit_message_text("🛍️ تم تصفير السلة. <b>اختر فئة المنتج الجديد لبدء طلب جديد:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+        # التعديل الجوهري: إرسال رسالة جديدة تماماً لكي يظهر السؤال بالأسفل وتبقى الفاتورة ظاهرة
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🛍️ <b>اختر فئة المنتج الجديد:</b>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
         return CATEGORY_SELECTION
 
 def main() -> None:
@@ -420,9 +384,7 @@ def main() -> None:
         states={
             CATEGORY_SELECTION: [
                 CallbackQueryHandler(category_callback, pattern='^cat_'),
-                CallbackQueryHandler(callback_handler, pattern='^start_again$'),
-                CallbackQueryHandler(callback_handler, pattern='^show_final_invoice$'),
-                CallbackQueryHandler(callback_handler, pattern='^reset_all$')
+                CallbackQueryHandler(callback_handler, pattern='^start_again$')
             ],
             PRICE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, price_input)],
             ADMIN_MENU: [CallbackQueryHandler(admin_callback)],
@@ -434,7 +396,8 @@ def main() -> None:
         },
         fallbacks=[
             CommandHandler("start", start),
-            CommandHandler("admin", admin_menu)
+            CommandHandler("admin", admin_menu),
+            CallbackQueryHandler(callback_handler, pattern='^start_again$')
         ]
     )
     
