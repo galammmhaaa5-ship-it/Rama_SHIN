@@ -368,7 +368,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 🇸🇾 <b>الإجمالي الكلي بالليرة:</b> {format_currency(grand_total_syp)} ل.س
 
 ---
-危害 <b>الآن الخطوة الأخيرة وهي التوصية:</b>
+ <b>الآن الخطوة الأخيرة وهي التوصية:</b>
 تتم التوصية بشكل رسمي عبر إرسال رسالة محددة عبر الواتساب إلى الرقم <a href="{wa_link}">{wa_number}</a>. 
 يجب أن تتضمن الرسالة المعلومات التالية:
 
@@ -386,8 +386,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 إجمالي السعر: {format_currency(grand_total_usd)} $
 طريقة الدفع: شام كاش
 ------------------------</code>
-شكراً لثقتكم ، نأمل أن نكون عند حسن ظنكم ☺️🩷
 """
+<b>شكراً لثقتكم ، نأمل أن نكون عند حسن ظنكم ☺️🩷</b>
         keyboard = [[InlineKeyboardButton("🔄 بدء طلب جديد بالكامل", callback_data='reset_all')]]
         await query.edit_message_text(final_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         return CATEGORY_SELECTION
