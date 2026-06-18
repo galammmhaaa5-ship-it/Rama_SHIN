@@ -386,8 +386,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 إجمالي السعر: {format_currency(grand_total_usd)} $
 طريقة الدفع: شام كاش
 ------------------------</code>
-"""
+
 <b>شكراً لثقتكم ، نأمل أن نكون عند حسن ظنكم ☺️🩷</b>
+"""
+
         keyboard = [[InlineKeyboardButton("🔄 بدء طلب جديد بالكامل", callback_data='reset_all')]]
         await query.edit_message_text(final_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         return CATEGORY_SELECTION
